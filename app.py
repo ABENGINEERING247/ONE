@@ -16,7 +16,11 @@ with st.sidebar:
     st.divider()
     mode = st.radio("Generation mode", ["Demo Mode", "API Mode"], help="Demo mode works without credentials. API mode uses your configured provider.")
     api_provider = st.selectbox("AI provider", ["OpenAI-compatible API"], disabled=(mode == "Demo Mode"))
-    model = st.text_input("Model name", value=st.secrets.get("OPENAI_MODEL", "gpt-4.1-mini") if hasattr(st, "secrets") else "gpt-4.1-mini", disabled=(mode == "Demo Mode"))
+    
+    # Added gpt-6-Luna model and temperature configuration
+    model = st.text_input("Model name", value=st.secrets.get("OPENAI_MODEL", "gpt-6-Luna") if hasattr(st, "secrets") else "gpt-6-Luna", disabled=(mode == "Demo Mode"))
+    temperature = st.slider("Temperature", min_value=0.0, max_value=2.0, value=1.0, step=0.1, disabled=(mode == "Demo Mode"), help="Controls randomness in generation. Set to 1.0 for balanced creativity and precision.")
+    
     st.caption("API keys stay server-side in Streamlit secrets.")
 
 projects = list_projects()
@@ -61,6 +65,7 @@ if generate_clicked:
             st.write("4/4 · Preparing editable outputs")
             try:
                 if mode == "API Mode":
+                    # Pass temperature if your generate_research function supports it, or use standard call
                     paper, sources = generate_research(idea, model=model)
                 else:
                     paper, sources = demo_research(idea)
@@ -121,14 +126,12 @@ if project.get("paper"):
             help="Choose standard styling specifications for your exports (font family, line spacing, margins, section headers)."
         )
         
-        # Mapping selected standard to internal parameter
         std_key = "Standard"
         if "IEEE" in format_standard:
             std_key = "IEEE"
         elif "APA" in format_standard:
             std_key = "APA"
             
-        # Display Helpful Formatting Hints
         with st.expander("ℹ️ View formatting hints & guidelines"):
             if std_key == "IEEE":
                 st.info("""
