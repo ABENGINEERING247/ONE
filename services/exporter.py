@@ -1,116 +1,196 @@
-from io import BytesIO
-import re, zipfile, json
+import io
+import zipfile
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
-from reportlab.lib.pagesizes import A4
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
-from xml.sax.saxutils import escape
 
-def _clean_title(title):
-    return re.sub(r"[^\w\-]+", "_", title.strip())[:70] or "ONE_research"
-
-def docx_bytes(title, markdown):
+def docx_bytes(title: str, markdown_content: str, style_standard: str = "Standard") -> bytes:
+    """
+    Generates DOCX bytes formatted according to the specified standard (Standard, IEEE, APA).
+    """
     doc = Document()
-    sec = doc.sections[0]
-    sec.top_margin = Inches(0.8); sec.bottom_margin = Inches(0.8)
-    sec.left_margin = Inches(0.9); sec.right_margin = Inches(0.9)
-    normal = doc.styles["Normal"]
-    normal.font.name = "Times New Roman"; normal.font.size = Pt(11)
-    normal.paragraph_format.space_after = Pt(6)
-    p = doc.add_paragraph()
-    p.alignment = 1
-    r = p.add_run(title); r.bold = True; r.font.name = "Times New Roman"; r.font.size = Pt(18); r.font.color.rgb = RGBColor(19, 100, 83)
-    for line in markdown.splitlines():
-        s = line.strip()
-        if not s: continue
-        if s.startswith("# "):
-            continue
-        if s.startswith("### "): doc.add_heading(s[4:], level=3)
-        elif s.startswith("## "): doc.add_heading(s[3:], level=1)
-        elif s.startswith("# "): doc.add_heading(s[2:], level=1)
-        elif s.startswith("> "):
-            p = doc.add_paragraph(s[2:])
-            p.paragraph_format.left_indent = Inches(0.25)
-        elif re.match(r"^\d+\.\s", s):
-            doc.add_paragraph(re.sub(r"^\d+\.\s", "", s), style="List Number")
-        elif s.startswith("- "):
-            doc.add_paragraph(s[2:], style="List Bullet")
-        else:
-            doc.add_paragraph(s.replace("**", "").replace("`", ""))
-    footer = sec.footer.paragraphs[0]
-    footer.text = "ONE — AI Research Agent | Review all claims and references before submission"
-    out = BytesIO(); doc.save(out); return out.getvalue()
+    
+    # Configure document margins and typography based on style
+    section = doc.sections[0]
+    
+    if style_standard == "IEEE":
+        section.top_margin = Inches(0.75)
+        section.bottom_margin = Inches(0.75)
+        section.left_margin = Inches(0.625)
+        section.right_margin = Inches(0.625)
+        font_name = "Times New Roman"
+        font_size = 10
+    elif style_standard == "APA":
+        section.top_margin = Inches(1.0)
+        section.bottom_margin = Inches(1.0)
+        section.left_margin = Inches(1.0)
+        section.right_margin = Inches(1.0)
+        font_name = "Times New Roman"
+        font_size = 12
+    else:  # Standard / General
+        section.top_margin = Inches(1.0)
+        section.bottom_margin = Inches(1.0)
+        section.left_margin = Inches(1.0)
+        section.right_margin = Inches(1.0)
+        font_name = "Calibri"
+        font_size = 11
 
-def pdf_bytes(title, markdown):
-    out = BytesIO()
-    doc = SimpleDocTemplate(out, pagesize=A4, rightMargin=54, leftMargin=54, topMargin=54, bottomMargin=54)
+    # Apply normal style rules
+    style_normal = doc.styles['Normal']
+    font = style_normal.font
+    font.name = font_name
+    font.size = Pt(font_size)
+    font.color.rgb = RGBColor(0, 0, 0)
+    
+    if style_standard == "APA":
+        style_normal.paragraph_format.line_spacing = 2.0
+        style_normal.paragraph_format.space_after = Pt(0)
+    else:
+        style_normal.paragraph_format.line_spacing = 1.15
+        style_normal.paragraph_format.space_after = Pt(6)
+
+    # Document Title
+    p_title = doc.add_paragraph()
+    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run_title = p_title.add_run(title)
+    run_title.font.name = font_name
+    run_title.font.size = Pt(24 if style_standard != "IEEE" else 18)
+    run_title.bold = True
+    
+    # Process Markdown Content
+    lines = markdown_content.splitlines()
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+            
+        if stripped.startswith("# "):
+            h = doc.add_heading(level=1)
+            h_run = h.add_run(stripped[2:])
+            h_run.font.name = font_name
+            h_run.bold = True
+        elif stripped.startswith("## "):
+            h = doc.add_heading(level=2)
+            h_run = h.add_run(stripped[3:])
+            h_run.font.name = font_name
+            h_run.bold = True
+        elif stripped.startswith("### "):
+            h = doc.add_heading(level=3)
+            h_run = h.add_run(stripped[4:])
+            h_run.font.name = font_name
+        elif stripped.startswith("- ") or stripped.startswith("* "):
+            doc.add_paragraph(stripped[2:], style='List Bullet')
+        else:
+            doc.add_paragraph(stripped)
+
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    return buffer.getvalue()
+
+
+def pdf_bytes(title: str, markdown_content: str, style_standard: str = "Standard") -> bytes:
+    """
+    Generates PDF bytes using ReportLab with custom styling according to standard.
+    """
+    buffer = io.BytesIO()
+    
+    # Setup page margins according to standard
+    if style_standard == "IEEE":
+        doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=45, rightMargin=45, topMargin=54, bottomMargin=54)
+        body_font = "Times-Roman"
+        body_size = 10
+        leading = 12
+    elif style_standard == "APA":
+        doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=72, rightMargin=72, topMargin=72, bottomMargin=72)
+        body_font = "Times-Roman"
+        body_size = 12
+        leading = 20
+    else:
+        doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=54, rightMargin=54, topMargin=54, bottomMargin=54)
+        body_font = "Helvetica"
+        body_size = 10.5
+        leading = 14
+
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="ONEtitle", parent=styles["Title"], textColor=colors.HexColor("#138A72"), alignment=TA_CENTER, fontName="Helvetica-Bold", fontSize=18, leading=22, spaceAfter=18))
-    styles.add(ParagraphStyle(name="H1custom", parent=styles["Heading1"], textColor=colors.HexColor("#176B5B"), spaceBefore=12, spaceAfter=6))
-    story = [Paragraph(escape(title), styles["ONEtitle"])]
-    for line in markdown.splitlines():
-        s = line.strip()
-        if not s: story.append(Spacer(1, 5)); continue
-        if s.startswith("> "):
-            story.append(Paragraph(f"<i>{escape(s[2:])}</i>", styles["BodyText"]))
-        elif s.startswith("### "):
-            story.append(Paragraph(escape(s[4:]), styles["Heading2"]))
-        elif s.startswith("## "):
-            story.append(Paragraph(escape(s[3:]), styles["H1custom"]))
-        elif s.startswith("# "):
+    
+    title_style = ParagraphStyle(
+        'DocTitle',
+        parent=styles['Heading1'],
+        fontName=body_font + "-Bold" if "Times" in body_font else "Helvetica-Bold",
+        fontSize=20 if style_standard != "IEEE" else 16,
+        leading=24,
+        alignment=1, # Centered
+        spaceAfter=15
+    )
+    
+    h1_style = ParagraphStyle(
+        'H1',
+        parent=styles['Heading2'],
+        fontName=body_font + "-Bold" if "Times" in body_font else "Helvetica-Bold",
+        fontSize=14,
+        leading=18,
+        spaceBefore=12,
+        spaceAfter=6
+    )
+
+    body_style = ParagraphStyle(
+        'Body',
+        parent=styles['Normal'],
+        fontName=body_font,
+        fontSize=body_size,
+        leading=leading,
+        spaceAfter=8
+    )
+
+    story = [Paragraph(title, title_style), HRFlowable(width="100%", thickness=1, color=colors.grey, spaceAfter=15)]
+    
+    for line in markdown_content.splitlines():
+        stripped = line.strip()
+        if not stripped:
             continue
-        elif s.startswith("- "):
-            story.append(Paragraph("• " + escape(s[2:]), styles["BodyText"]))
-        elif re.match(r"^\d+\.\s", s):
-            story.append(Paragraph(escape(s), styles["BodyText"]))
+        if stripped.startswith("#"):
+            clean_text = stripped.lstrip("#").strip()
+            story.append(Paragraph(clean_text, h1_style))
         else:
-            story.append(Paragraph(escape(s.replace("**", "").replace("`", "")), styles["BodyText"]))
-        story.append(Spacer(1, 4))
+            story.append(Paragraph(stripped, body_style))
+            
     doc.build(story)
-    return out.getvalue()
+    return buffer.getvalue()
 
-def latex_source(title, markdown):
-    body = []
-    for line in markdown.splitlines():
-        s = line.strip()
-        if not s: continue
-        if s.startswith("# "): continue
-        if s.startswith("### "): body.append(r"\subsection{" + _latex_escape(s[4:]) + "}")
-        elif s.startswith("## "): body.append(r"\section{" + _latex_escape(s[3:]) + "}")
-        elif s.startswith("> "): body.append(r"\begin{quote}" + _latex_escape(s[2:]) + r"\end{quote}")
-        elif s.startswith("- "): body.append(r"\begin{itemize}\item " + _latex_escape(s[2:]) + r"\end{itemize}")
-        else: body.append(_latex_escape(s.replace("**", "").replace("`", "")))
-        body.append("")
-    return (r"""\documentclass[12pt,a4paper]{article}
-\usepackage[margin=1in]{geometry}
-\usepackage[T1]{fontenc}
-\usepackage{lmodern}
-\usepackage{amsmath,amssymb}
-\usepackage{graphicx}
-\usepackage{hyperref}
-\usepackage{setspace}
-\onehalfspacing
-\title{""" + _latex_escape(title) + r"""}
-\author{Prepared with ONE -- AI Research Agent}
-\date{\today}
-\begin{document}
-\maketitle
-""" + "\n".join(body) + r"""
-\end{document}
-""").encode("utf-8")
 
-def _latex_escape(s):
-    replacements = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}
-    return "".join(replacements.get(c, c) for c in s)
+def latex_source(title: str, markdown_content: str, style_standard: str = "Standard") -> str:
+    """
+    Generates LaTeX document string.
+    """
+    doc_class = "\\documentclass[10pt, journal, compsoc]{IEEEtran}" if style_standard == "IEEE" else "\\documentclass[12pt]{article}"
+    
+    tex = f"""{doc_class}
+\\usepackage[utf8]{{utf8}}
+\\usepackage{{amsmath}}
+\\usepackage{{hyperref}}
 
-def project_zip(title, markdown, sources):
-    out = BytesIO()
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr(f"{_clean_title(title)}/manuscript.md", markdown)
-        z.writestr(f"{_clean_title(title)}/manuscript.tex", latex_source(title, markdown))
-        z.writestr(f"{_clean_title(title)}/sources.json", json.dumps(sources, indent=2, ensure_ascii=False))
-        z.writestr(f"{_clean_title(title)}/README.txt", "ONE research project export. Review claims, sources, methodology, and any required declarations before submission.")
-    return out.getvalue()
+\\title{{{title}}}
+\\author{{Generated by ONE AI Workspace}}
+\\date{{\\today}}
+
+\\begin{{document}}
+\\maketitle
+
+{markdown_content}
+
+\\end{{document}}
+"""
+    return tex
+
+
+def project_zip(title: str, markdown_content: str, sources: list, style_standard: str = "Standard") -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manuscript.docx", docx_bytes(title, markdown_content, style_standard))
+        zf.writestr("manuscript.pdf", pdf_bytes(title, markdown_content, style_standard))
+        zf.writestr("manuscript.tex", latex_source(title, markdown_content, style_standard))
+    return buffer.getvalue()
