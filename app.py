@@ -1,99 +1,196 @@
-with right:
-        st.markdown("### Export center")
-        st.caption("Exports use the current saved manuscript. Save edits before downloading.")
-        
-        if st.button("Save before export", use_container_width=True):
-            project["title"], project["paper"] = new_title, edited
-            save_project(project)
-            st.session_state["active_project"] = project
-            st.success("Saved.")
-            
-        st.divider()
-        
-        # --- Formatting Standard Selection ---
-        st.markdown("#### Formatting options")
-        format_standard = st.selectbox(
-            "Select Formatting Standard",
-            ["Standard / General", "IEEE Standard", "APA 7th Edition"],
-            help="Choose standard styling specifications for your exports (font family, line spacing, margins, section headers)."
-        )
-        
-        # Mapping selected standard to internal parameter
-        std_key = "Standard"
-        if "IEEE" in format_standard:
-            std_key = "IEEE"
-        elif "APA" in format_standard:
-            std_key = "APA"
-            
-        # Display Helpful Formatting Hints
-        with st.expander("ℹ️ View formatting hints & guidelines"):
-            if std_key == "IEEE":
-                st.info("""
-                **IEEE Standard Guidelines:**
-                - **Font:** 10 pt Times New Roman.
-                - **Margins:** Top/Bottom: 0.75", Left/Right: 0.625".
-                - **Layout:** Compact layout, single or double column compatible.
-                - **Headings:** Roman numerals for main headings (I., II., etc.).
-                """)
-            elif std_key == "APA":
-                st.info("""
-                **APA 7th Edition Guidelines:**
-                - **Font:** 12 pt Times New Roman (or 11 pt Calibri).
-                - **Line Spacing:** Double-spaced text throughout.
-                - **Margins:** 1-inch (2.54 cm) on all sides.
-                - **Structure:** Title page, abstract, main text, and references.
-                """)
-            else:
-                st.info("""
-                **Standard / General Formatting:**
-                - **Font:** 11 pt Calibri / Helvetica.
-                - **Line Spacing:** 1.15 line spacing with 6 pt paragraph spacing.
-                - **Margins:** Standard 1-inch margins.
-                - **Best for:** General proposals, corporate reports, and drafts.
-                """)
+import io
+import zipfile
+from docx import Document
+from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
+from reportlab.lib import colors
 
-        st.divider()
-        st.markdown("#### Downloads")
-        
-        current = edited
-        try:
-            st.download_button(
-                "⬇ Download Word (.docx)", 
-                data=docx_bytes(new_title, current, style_standard=std_key), 
-                file_name=f"ONE_{std_key}_paper.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
-                use_container_width=True,
-                help="Download fully styled Microsoft Word document."
-            )
-            st.download_button(
-                "⬇ Download PDF", 
-                data=pdf_bytes(new_title, current, style_standard=std_key), 
-                file_name=f"ONE_{std_key}_paper.pdf",
-                mime="application/pdf", 
-                use_container_width=True,
-                help="Download ready-to-print formatted PDF."
-            )
-            st.download_button(
-                "⬇ Download LaTeX (.tex)", 
-                data=latex_source(new_title, current, style_standard=std_key), 
-                file_name=f"ONE_{std_key}_paper.tex",
-                mime="application/x-tex", 
-                use_container_width=True,
-                help="Download LaTeX source code with appropriate document class."
-            )
-            st.download_button(
-                "⬇ Download project ZIP", 
-                data=project_zip(new_title, current, project.get("sources", []), style_standard=std_key),
-                file_name="ONE_research_project.zip", 
-                mime="application/zip", 
-                use_container_width=True
-            )
-        except Exception as exc:
-            st.error(f"Export error: {exc}")
+def docx_bytes(title: str, markdown_content: str, style_standard: str = "Standard") -> bytes:
+    """
+    Generates DOCX bytes formatted according to the specified standard (Standard, IEEE, APA).
+    """
+    doc = Document()
+    
+    # Configure document margins and typography based on style
+    section = doc.sections[0]
+    
+    if style_standard == "IEEE":
+        section.top_margin = Inches(0.75)
+        section.bottom_margin = Inches(0.75)
+        section.left_margin = Inches(0.625)
+        section.right_margin = Inches(0.625)
+        font_name = "Times New Roman"
+        font_size = 10
+    elif style_standard == "APA":
+        section.top_margin = Inches(1.0)
+        section.bottom_margin = Inches(1.0)
+        section.left_margin = Inches(1.0)
+        section.right_margin = Inches(1.0)
+        font_name = "Times New Roman"
+        font_size = 12
+    else:  # Standard / General
+        section.top_margin = Inches(1.0)
+        section.bottom_margin = Inches(1.0)
+        section.left_margin = Inches(1.0)
+        section.right_margin = Inches(1.0)
+        font_name = "Calibri"
+        font_size = 11
+
+    # Apply normal style rules
+    style_normal = doc.styles['Normal']
+    font = style_normal.font
+    font.name = font_name
+    font.size = Pt(font_size)
+    font.color.rgb = RGBColor(0, 0, 0)
+    
+    if style_standard == "APA":
+        style_normal.paragraph_format.line_spacing = 2.0
+        style_normal.paragraph_format.space_after = Pt(0)
+    else:
+        style_normal.paragraph_format.line_spacing = 1.15
+        style_normal.paragraph_format.space_after = Pt(6)
+
+    # Document Title
+    p_title = doc.add_paragraph()
+    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run_title = p_title.add_run(title)
+    run_title.font.name = font_name
+    run_title.font.size = Pt(24 if style_standard != "IEEE" else 18)
+    run_title.bold = True
+    
+    # Process Markdown Content
+    lines = markdown_content.splitlines()
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
             
-        st.markdown("### Quality checklist")
-        st.checkbox("Research question is clear", key="qc_question")
-        st.checkbox("Sources and citations have been checked", key="qc_sources")
-        st.checkbox("Methods and findings reflect real evidence", key="qc_evidence")
-        st.checkbox("Final manuscript reviewed by a human", key="qc_review")
-        st.caption("Checklist items are reminders, not a certification of research quality.")
+        if stripped.startswith("# "):
+            h = doc.add_heading(level=1)
+            h_run = h.add_run(stripped[2:])
+            h_run.font.name = font_name
+            h_run.bold = True
+        elif stripped.startswith("## "):
+            h = doc.add_heading(level=2)
+            h_run = h.add_run(stripped[3:])
+            h_run.font.name = font_name
+            h_run.bold = True
+        elif stripped.startswith("### "):
+            h = doc.add_heading(level=3)
+            h_run = h.add_run(stripped[4:])
+            h_run.font.name = font_name
+        elif stripped.startswith("- ") or stripped.startswith("* "):
+            doc.add_paragraph(stripped[2:], style='List Bullet')
+        else:
+            doc.add_paragraph(stripped)
+
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    return buffer.getvalue()
+
+
+def pdf_bytes(title: str, markdown_content: str, style_standard: str = "Standard") -> bytes:
+    """
+    Generates PDF bytes using ReportLab with custom styling according to standard.
+    """
+    buffer = io.BytesIO()
+    
+    # Setup page margins according to standard
+    if style_standard == "IEEE":
+        doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=45, rightMargin=45, topMargin=54, bottomMargin=54)
+        body_font = "Times-Roman"
+        body_size = 10
+        leading = 12
+    elif style_standard == "APA":
+        doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=72, rightMargin=72, topMargin=72, bottomMargin=72)
+        body_font = "Times-Roman"
+        body_size = 12
+        leading = 20
+    else:
+        doc = SimpleDocTemplate(buffer, pagesize=letter, leftMargin=54, rightMargin=54, topMargin=54, bottomMargin=54)
+        body_font = "Helvetica"
+        body_size = 10.5
+        leading = 14
+
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle(
+        'DocTitle',
+        parent=styles['Heading1'],
+        fontName=body_font + "-Bold" if "Times" in body_font else "Helvetica-Bold",
+        fontSize=20 if style_standard != "IEEE" else 16,
+        leading=24,
+        alignment=1, # Centered
+        spaceAfter=15
+    )
+    
+    h1_style = ParagraphStyle(
+        'H1',
+        parent=styles['Heading2'],
+        fontName=body_font + "-Bold" if "Times" in body_font else "Helvetica-Bold",
+        fontSize=14,
+        leading=18,
+        spaceBefore=12,
+        spaceAfter=6
+    )
+
+    body_style = ParagraphStyle(
+        'Body',
+        parent=styles['Normal'],
+        fontName=body_font,
+        fontSize=body_size,
+        leading=leading,
+        spaceAfter=8
+    )
+
+    story = [Paragraph(title, title_style), HRFlowable(width="100%", thickness=1, color=colors.grey, spaceAfter=15)]
+    
+    for line in markdown_content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            clean_text = stripped.lstrip("#").strip()
+            story.append(Paragraph(clean_text, h1_style))
+        else:
+            story.append(Paragraph(stripped, body_style))
+            
+    doc.build(story)
+    return buffer.getvalue()
+
+
+def latex_source(title: str, markdown_content: str, style_standard: str = "Standard") -> str:
+    """
+    Generates LaTeX document string.
+    """
+    doc_class = "\\documentclass[10pt, journal, compsoc]{IEEEtran}" if style_standard == "IEEE" else "\\documentclass[12pt]{article}"
+    
+    tex = f"""{doc_class}
+\\usepackage[utf8]{{utf8}}
+\\usepackage{{amsmath}}
+\\usepackage{{hyperref}}
+
+\\title{{{title}}}
+\\author{{Generated by ONE AI Workspace}}
+\\date{{\\today}}
+
+\\begin{{document}}
+\\maketitle
+
+{markdown_content}
+
+\\end{{document}}
+"""
+    return tex
+
+
+def project_zip(title: str, markdown_content: str, sources: list, style_standard: str = "Standard") -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manuscript.docx", docx_bytes(title, markdown_content, style_standard))
+        zf.writestr("manuscript.pdf", pdf_bytes(title, markdown_content, style_standard))
+        zf.writestr("manuscript.tex", latex_source(title, markdown_content, style_standard))
+    return buffer.getvalue()
